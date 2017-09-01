@@ -1,0 +1,87 @@
+
+
+
+Reed-solomon takes a number of data blocks (all the same size), generates a number of parity blocks,
+then can recover any blocks that get lost or destroyed,
+as long as the number of blocks lost is equal to or less than the number of parity blocks originally generated.
+
+The blocks to be (re)generated need to be initially zero-filled. 
+
+The max number of (total) blocks is specified by the galois field used (eg, 8 or 16 bit.) The block size must then 
+be a multiple of 1 or 2 bytes respectively.
+
+The method used comes from the following paper:
+http://web.eecs.utk.edu/~plank/plank/papers/SPE-9-97.html
+http://web.eecs.utk.edu/~plank/plank/papers/CS-03-504.html
+
+
+Block indexes
+--------------------------------
+
+Each block is given a unique index, with data blocks first and then parity.
+For example if you have d data blocks and p parity blocks, the data blocks will have indexes from 0 to d-1, and 
+the parity blocks will have indexes from d to d+p-1.
+
+
+Partial generation
+--------------------------------
+
+The general operation, of both generating parity blocks and recovering blocks, is
+
+foreach block (bi) that is intact
+	foreach block (bg) that needs generating
+		bg += a * bi
+
+where "a" is a single number taken from the encoding/recovery matrix, 
+multiplying a block by a single number means multiplying every element (of the appropriate datatype) of the block by the number,
+and where + and * are not the usual operations but instead are defined by a galois field.
+
+This has some implications:
+	
+Not every block needs to be present in memory at the same time. For example, you could split data and parity blocks sets 
+each in half, and then call GeneratePartial() 4 times with each possible pairing of those sets. Or keep only the
+partially-generated parity blocks in memory, and read the data blocks in one at a time from disk.
+
+
+You must specify the (max) number of data and parity blocks in advance.
+But since adding a zero filled block is a no-op, you can add extra empty (zero filled) data blocks at the beginning.
+Then if you need to add more data blocks later, the only reading/processing that needs to be done is "adding" 
+the new blocks to the existing parity blocks - no need to re-read the rest of the data blocks.
+The library supports this in that blocks can be marked as being zero filled without needing an actual buffer attached.
+
+
+Guide to the codebase
+--------------------------------
+
+buffer.cs
+All memory access by the blocks is done through IBuffer, which is like a void pointer with extra safety bounds checks.
+There are separate implementation classes for managed arrays and unmanaged memory.
+Rather than having separate offset and length parameters to every function, there is the GetSlice() method to 
+reference a part of a buffer.
+There are helpers for reading/writing between streams and buffers.
+
+
+galoisfield.cs
+implements the + and * operations defined by the fields.
+has separate performance functions for multiplying/adding every byte/short in a memory block.
+implements matrix math using field operations, with the usual operations (get inverse, matrix multiply, etc.)
+
+
+reedsolomon.cs
+implements generation and recovery for a single set of blocks as described in the "partial generation" section, using galois field operations
+RSBlock class - wraps the buffer, index, and role information for a single block
+RSBlockType - flags enum describing the role of a block
+
+
+blocklistmanager.cs
+helper class for adapting streams for use instead of blocks, by breaking up the streams into segments to be processed separately
+
+
+
+Notably not implemented
+--------------------------------
+
+BufferSlice.Dispose() currently does nothing and most things that hold an IBuffer do not dispose it.
+VirtualAllocBuffers will eventually get freed by the finalizer, but we need to figure out 
+something with refcounting, which is terrible in c# due to the non overloadable assignment operator.
+
